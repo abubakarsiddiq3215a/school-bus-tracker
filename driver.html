@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="School Bus Tracker — Driver dashboard for real-time GPS broadcasting." />
+  <title>School Bus Tracker — Driver</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Loader -->
+  <div id="loader" class="loader-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar" id="driver-navbar" style="display:none;">
+    <div class="logo">
+      <span class="icon">🚌</span>
+      <span>Bus Tracker</span>
+    </div>
+    <div class="nav-right">
+      <span class="user-badge" id="driver-name-badge">Driver</span>
+      <button class="btn btn-outline btn-sm" onclick="logout()" id="logout-btn">Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="page-container" id="driver-content" style="display:none;">
+    <div class="page-header">
+      <h1>🛞 Driver Dashboard</h1>
+      <p>Share your live location with parents while on a trip.</p>
+    </div>
+
+    <div class="driver-controls">
+
+      <!-- Info Box -->
+      <div class="info-box info">
+        <span>ℹ️</span>
+        <span>Press <strong>Start Trip</strong> to begin broadcasting your GPS location. Parents will see your bus on the map in real-time.</span>
+      </div>
+
+      <!-- Trip Status Card -->
+      <div class="card trip-status-card" id="trip-status-card">
+        <div class="big-icon" id="trip-icon">🅿️</div>
+        <h2 id="trip-status-text">Trip Inactive</h2>
+        <div id="trip-status-badge">
+          <span class="status-badge status-inactive">
+            <span class="status-dot"></span> Inactive
+          </span>
+        </div>
+        <div class="coord-display" id="coord-display">
+          Lat: —  &nbsp; Lng: —
+        </div>
+        <div class="coord-display" style="margin-top:0.5rem; font-size:0.78rem; color:var(--text-dark);">
+          Bus: <strong id="bus-id-display">—</strong> &nbsp;|&nbsp; Updates: <strong id="update-count">0</strong>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="trip-actions">
+        <button class="btn btn-success btn-lg" id="start-trip-btn" onclick="startTrip()">
+          ▶️ Start Trip
+        </button>
+        <button class="btn btn-danger btn-lg" id="stop-trip-btn" onclick="stopTrip()" disabled>
+          ⏹️ Stop Trip
+        </button>
+      </div>
+
+      <!-- GPS Error Box (hidden by default) -->
+      <div class="info-box warning hidden" id="gps-error-box">
+        <span>⚠️</span>
+        <span id="gps-error-msg">GPS error message here.</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // ──── Driver Page Logic ───────────────────────────────────────
+    (function () {
+      // State variables
+      let assignedBusId = null;   // The bus ID assigned to this driver
+      let watchId = null;         // Geolocation watchPosition ID
+      let updateInterval = null;  // setInterval ID for Firestore updates
+      let currentLat = null;      // Latest latitude
+      let currentLng = null;      // Latest longitude
+      let updateCount = 0;        // Number of location updates sent
+      let isTripActive = false;   // Is the trip currently running?
+
+      // DOM references
+      const navbar = document.getElementById('driver-navbar');
+      const content = document.getElementById('driver-content');
+      const nameBadge = document.getElementById('driver-name-badge');
+      const tripIcon = document.getElementById('trip-icon');
+      const tripStatusText = document.getElementById('trip-status-text');
+      const tripStatusBadge = document.getElementById('trip-status-badge');
+      const coordDisplay = document.getElementById('coord-display');
+      const busIdDisplay = document.getElementById('bus-id-display');
+      const updateCountEl = document.getElementById('update-count');
+      const startBtn = document.getElementById('start-trip-btn');
+      const stopBtn = document.getElementById('stop-trip-btn');
+      const gpsErrorBox = document.getElementById('gps-error-box');
+      const gpsErrorMsg = document.getElementById('gps-error-msg');
+
+      // ── Auth check ──
+      requireAuth('driver').then(({ user, userData }) => {
+        // Show UI
+        hideLoader();
+        navbar.style.display = 'flex';
+        content.style.display = 'block';
+
+        // Display driver name
+        nameBadge.innerHTML = `👤 <strong>${userData.name || user.email}</strong>`;
+
+        // Get assigned bus
+        assignedBusId = userData.assigned_bus_id || null;
+        if (assignedBusId) {
+          busIdDisplay.textContent = assignedBusId;
+        } else {
+          busIdDisplay.textContent = 'Not assigned';
+          startBtn.disabled = true;
+          showToast('No bus assigned to your account. Contact admin.', 'warning');
+        }
+
+        // Check if bus was left in active state (e.g. page refresh)
+        if (assignedBusId) {
+          db.collection('buses').doc(assignedBusId).get().then(busDoc => {
+            if (busDoc.exists && busDoc.data().status === 'active') {
+              // Resume trip automatically
+              showToast('Resuming active trip…', 'info');
+              startTrip();
+            }
+          });
+        }
+      }).catch(() => {
+        // Auth guard handles redirect
+      });
+
+      // ── Start Trip ──
+      window.startTrip = function () {
+        if (!assignedBusId) {
+          showToast('No bus assigned. Contact admin.', 'error');
+          return;
+        }
+
+        // Check for Geolocation support
+        if (!navigator.geolocation) {
+          showGpsError('Your browser does not support GPS location.');
+          return;
+        }
+
+        isTripActive = true;
+        updateCount = 0;
+        updateCountEl.textContent = '0';
+        hideGpsError();
+
+        // Update UI to active state
+        setTripUI(true);
+
+        // Update bus status in Firestore to active
+        db.collection('buses').doc(assignedBusId).update({
+          status: 'active',
+          driver_id: firebase.auth().currentUser.uid
+        }).catch(err => {
+          console.error('Error updating bus status:', err);
+          showToast('Failed to update bus status.', 'error');
+        });
+
+        showToast('Trip started! Broadcasting location…', 'success');
+
+        // Start watching GPS position
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            currentLat = position.coords.latitude;
+            currentLng = position.coords.longitude;
+
+            // Update coordinate display
+            coordDisplay.textContent = `Lat: ${currentLat.toFixed(6)}  |  Lng: ${currentLng.toFixed(6)}`;
+            hideGpsError();
+          },
+          (error) => {
+            // Handle GPS errors gracefully
+            handleGpsError(error);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 2000,
+            timeout: 10000
+          }
+        );
+
+        // Send location to Firestore every 4 seconds
+        updateInterval = setInterval(() => {
+          if (currentLat !== null && currentLng !== null && isTripActive) {
+            sendLocationToFirestore(currentLat, currentLng);
+          }
+        }, 4000);
+      };
+
+      // ── Stop Trip ──
+      window.stopTrip = function () {
+        isTripActive = false;
+
+        // Stop GPS watching
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+        }
+
+        // Stop Firestore update interval
+        if (updateInterval !== null) {
+          clearInterval(updateInterval);
+          updateInterval = null;
+        }
+
+        // Update bus status in Firestore to inactive
+        if (assignedBusId) {
+          db.collection('buses').doc(assignedBusId).update({
+            status: 'inactive'
+          }).catch(err => {
+            console.error('Error updating bus status:', err);
+          });
+        }
+
+        // Reset UI
+        setTripUI(false);
+        coordDisplay.textContent = 'Lat: —  |  Lng: —';
+        currentLat = null;
+        currentLng = null;
+
+        showToast('Trip stopped. Location broadcasting ended.', 'info');
+      };
+
+      // ── Send location update to Firestore ──
+      function sendLocationToFirestore(lat, lng) {
+        if (!assignedBusId) return;
+
+        db.collection('buses').doc(assignedBusId).update({
+          current_location: new firebase.firestore.GeoPoint(lat, lng),
+          last_updated: firebase.firestore.FieldValue.serverTimestamp(),
+          status: 'active'
+        }).then(() => {
+          updateCount++;
+          updateCountEl.textContent = updateCount;
+        }).catch(err => {
+          console.error('Error sending location:', err);
+          showToast('Failed to send location update.', 'warning');
+        });
+      }
+
+      // ── Handle GPS errors ──
+      function handleGpsError(error) {
+        let msg = '';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            msg = 'Location permission denied. Please enable GPS access in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            msg = 'Location information is unavailable. Check your GPS.';
+            break;
+          case error.TIMEOUT:
+            msg = 'Location request timed out. Retrying…';
+            break;
+          default:
+            msg = 'An unknown GPS error occurred.';
+        }
+        showGpsError(msg);
+
+        // If permission denied, stop the trip
+        if (error.code === error.PERMISSION_DENIED) {
+          stopTrip();
+        }
+      }
+
+      function showGpsError(msg) {
+        gpsErrorBox.classList.remove('hidden');
+        gpsErrorMsg.textContent = msg;
+      }
+
+      function hideGpsError() {
+        gpsErrorBox.classList.add('hidden');
+      }
+
+      // ── Update Trip UI ──
+      function setTripUI(active) {
+        if (active) {
+          tripIcon.textContent = '🚌';
+          tripStatusText.textContent = 'Trip Active — Broadcasting';
+          tripStatusBadge.innerHTML = '<span class="status-badge status-active"><span class="status-dot"></span> Active</span>';
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+
+          // Add glow effect to card
+          document.getElementById('trip-status-card').style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        } else {
+          tripIcon.textContent = '🅿️';
+          tripStatusText.textContent = 'Trip Inactive';
+          tripStatusBadge.innerHTML = '<span class="status-badge status-inactive"><span class="status-dot"></span> Inactive</span>';
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+
+          document.getElementById('trip-status-card').style.borderColor = '';
+        }
+      }
+
+      // ── Cleanup on page unload ──
+      window.addEventListener('beforeunload', () => {
+        if (isTripActive) {
+          // Note: Firestore update may not complete on unload, but we try
+          if (assignedBusId) {
+            db.collection('buses').doc(assignedBusId).update({
+              status: 'inactive'
+            });
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

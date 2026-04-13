@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="School Bus Tracker — Admin dashboard for managing drivers, parents, and buses." />
+  <title>School Bus Tracker — Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Loader -->
+  <div id="loader" class="loader-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar" id="admin-navbar" style="display:none;">
+    <div class="logo">
+      <span class="icon">🚌</span>
+      <span>Bus Tracker <span style="color:var(--accent-light); font-size:0.75rem; margin-left:0.3rem;">ADMIN</span></span>
+    </div>
+    <div class="nav-right">
+      <span class="user-badge" id="admin-name-badge">Admin</span>
+      <button class="btn btn-outline btn-sm" onclick="logout()" id="logout-btn">Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="page-container" id="admin-content" style="display:none;">
+    <div class="page-header">
+      <h1>⚙️ Admin Dashboard</h1>
+      <p>Manage drivers, parents, buses, and assignments.</p>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="stats-row" id="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon">🚌</div>
+        <div class="stat-info">
+          <span class="stat-value" id="stat-buses">0</span>
+          <span class="stat-label">Buses</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🛞</div>
+        <div class="stat-info">
+          <span class="stat-value" id="stat-drivers">0</span>
+          <span class="stat-label">Drivers</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">👨‍👩‍👧</div>
+        <div class="stat-info">
+          <span class="stat-value" id="stat-parents">0</span>
+          <span class="stat-label">Parents</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🟢</div>
+        <div class="stat-info">
+          <span class="stat-value" id="stat-active">0</span>
+          <span class="stat-label">Active Trips</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Fleet Map -->
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>🗺️ Live Fleet Tracker</h2>
+        <span class="status-badge" id="fleet-map-status">
+          <span class="status-dot"></span> Monitoring
+        </span>
+      </div>
+      <div class="map-wrapper">
+        <div id="admin-map"></div>
+      </div>
+    </div>
+
+    <!-- Admin Grid -->
+    <div class="admin-grid">
+
+      <!-- 1. Create Driver -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🛞 Create Driver Account</h2>
+        </div>
+        <form id="create-driver-form">
+          <div class="form-group">
+            <label for="driver-name">Full Name</label>
+            <input type="text" id="driver-name" class="form-control" placeholder="John Smith" required />
+          </div>
+          <div class="form-group">
+            <label for="driver-email">Email</label>
+            <input type="email" id="driver-email" class="form-control" placeholder="driver@school.com" required />
+          </div>
+          <div class="form-group">
+            <label for="driver-password">Password</label>
+            <input type="password" id="driver-password" class="form-control" placeholder="Min. 6 characters" required minlength="6" />
+          </div>
+          <button type="submit" class="btn btn-primary" id="create-driver-btn">
+            ➕ Create Driver
+          </button>
+        </form>
+      </div>
+
+      <!-- 2. Create Bus -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🚌 Create Bus Entry</h2>
+        </div>
+        <form id="create-bus-form">
+          <div class="form-group">
+            <label for="bus-id-input">Bus ID / Number</label>
+            <input type="text" id="bus-id-input" class="form-control" placeholder="BUS-001" required />
+          </div>
+          <button type="submit" class="btn btn-primary" id="create-bus-btn">
+            ➕ Create Bus
+          </button>
+        </form>
+
+        <!-- Existing Buses -->
+        <div class="card-header" style="margin-top:1.5rem;">
+          <h2>📋 Buses</h2>
+        </div>
+        <div id="buses-table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Bus ID</th>
+                <th>Driver</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="buses-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3. Assign Driver to Bus -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🔗 Assign Driver → Bus</h2>
+        </div>
+        <form id="assign-driver-form">
+          <div class="form-group">
+            <label for="assign-driver-select">Select Driver</label>
+            <select id="assign-driver-select" class="form-control" required>
+              <option value="">— Choose Driver —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="assign-driver-bus-select">Select Bus</label>
+            <select id="assign-driver-bus-select" class="form-control" required>
+              <option value="">— Choose Bus —</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-accent" id="assign-driver-btn">
+            🔗 Assign Driver
+          </button>
+        </form>
+      </div>
+
+      <!-- 4. Assign Parent to Bus -->
+      <div class="card">
+        <div class="card-header">
+          <h2>👨‍👩‍👧 Assign Parent → Bus</h2>
+        </div>
+        <form id="assign-parent-form">
+          <div class="form-group">
+            <label for="assign-parent-select">Select Parent</label>
+            <select id="assign-parent-select" class="form-control" required>
+              <option value="">— Choose Parent —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="assign-parent-bus-select">Select Bus</label>
+            <select id="assign-parent-bus-select" class="form-control" required>
+              <option value="">— Choose Bus —</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-accent" id="assign-parent-btn">
+            🔗 Assign Parent
+          </button>
+        </form>
+
+        <!-- Create Parent Account -->
+        <div class="card-header" style="margin-top:1.5rem;">
+          <h2>➕ Create Parent Account</h2>
+        </div>
+        <form id="create-parent-form">
+          <div class="form-group">
+            <label for="parent-name">Full Name</label>
+            <input type="text" id="parent-name" class="form-control" placeholder="Jane Doe" required />
+          </div>
+          <div class="form-group">
+            <label for="parent-email">Email</label>
+            <input type="email" id="parent-email" class="form-control" placeholder="parent@email.com" required />
+          </div>
+          <div class="form-group">
+            <label for="parent-password">Password</label>
+            <input type="password" id="parent-password" class="form-control" placeholder="Min. 6 characters" required minlength="6" />
+          </div>
+          <button type="submit" class="btn btn-primary" id="create-parent-btn">
+            ➕ Create Parent
+          </button>
+        </form>
+      </div>
+
+      <!-- 5. All Users -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-header">
+          <h2>👥 All Users</h2>
+          <button class="btn btn-outline btn-sm" onclick="loadAllData()" id="refresh-btn">🔄 Refresh</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Assigned Bus</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <tr><td colspan="4" style="color:var(--text-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /admin-grid -->
+  </div><!-- /page-container -->
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="app.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBqpH4NoMbdRasZbK_dG80ZCxZdpZD7088&callback=initAdminMap" async defer></script>
+  <script>
+    // ──── Admin Page Logic ────────────────────────────────────────
+
+    // ── Google Maps for Admin ──
+    let adminMap = null;
+    let busMarkers = {};  // { busId: google.maps.Marker }
+    let busListeners = []; // Firestore unsubscribe functions
+
+    window.initAdminMap = function () {
+      adminMap = new google.maps.Map(document.getElementById('admin-map'), {
+        zoom: 12,
+        center: { lat: 20.5937, lng: 78.9629 },
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [
+          { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#304a7d' }] },
+          { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#255d6a' }] },
+          { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2c6675' }] },
+          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
+          { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#283d6a' }] },
+          { featureType: 'poi.park', elementType: 'geometry.fill', stylers: [{ color: '#023e58' }] },
+          { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f3948' }] },
+        ],
+      });
+    };
+
+    /**
+     * Start real-time listeners for ALL buses on the admin map.
+     */
+    function startFleetTracking(buses, users) {
+      // Clear old listeners
+      busListeners.forEach(unsub => unsub());
+      busListeners = [];
+
+      // Clear old markers
+      Object.values(busMarkers).forEach(m => m.setMap(null));
+      busMarkers = {};
+
+      let activeBuses = 0;
+
+      buses.forEach(bus => {
+        const unsub = db.collection('buses').doc(bus.id).onSnapshot(doc => {
+          if (!doc.exists || !adminMap) return;
+          const data = doc.data();
+          const loc = data.current_location;
+          const status = data.status || 'inactive';
+
+          if (loc && loc.latitude && loc.longitude) {
+            const pos = { lat: loc.latitude, lng: loc.longitude };
+            const driver = users.find(u => u.id === data.driver_id);
+            const driverName = driver ? (driver.name || driver.email) : 'Unassigned';
+            const color = status === 'active' ? '#10b981' : '#ef4444';
+
+            if (busMarkers[bus.id]) {
+              busMarkers[bus.id].setPosition(pos);
+              busMarkers[bus.id].setIcon(makeBusIcon(color));
+            } else {
+              const marker = new google.maps.Marker({
+                position: pos,
+                map: adminMap,
+                title: `${bus.id} — ${driverName}`,
+                icon: makeBusIcon(color),
+              });
+
+              // Info window on click
+              const infoWindow = new google.maps.InfoWindow({
+                content: `<div style="color:#0f172a;font-family:Inter,sans-serif;padding:4px;">
+                  <strong>${bus.id}</strong><br>
+                  Driver: ${driverName}<br>
+                  Status: <span style="color:${color};font-weight:600;">${status.toUpperCase()}</span>
+                </div>`
+              });
+              marker.addListener('click', () => infoWindow.open(adminMap, marker));
+
+              busMarkers[bus.id] = marker;
+            }
+
+            // Center map on first active bus found
+            if (status === 'active') {
+              adminMap.panTo(pos);
+            }
+          }
+        });
+        busListeners.push(unsub);
+      });
+
+      // Update fleet status badge
+      const activeCount = buses.filter(b => b.status === 'active').length;
+      const badge = document.getElementById('fleet-map-status');
+      if (activeCount > 0) {
+        badge.className = 'status-badge status-active';
+        badge.innerHTML = `<span class="status-dot"></span> ${activeCount} Active`;
+      } else {
+        badge.className = 'status-badge status-inactive';
+        badge.innerHTML = '<span class="status-dot"></span> No Active Trips';
+      }
+    }
+
+    function makeBusIcon(color) {
+      return {
+        url: 'data:image/svg+xml,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52">
+            <circle cx="26" cy="26" r="24" fill="${color}" opacity="0.2"/>
+            <circle cx="26" cy="26" r="15" fill="${color}" opacity="0.5"/>
+            <text x="26" y="33" text-anchor="middle" font-size="20">🚌</text>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(52, 52),
+        anchor: new google.maps.Point(26, 26),
+      };
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      busListeners.forEach(unsub => unsub());
+    });
+
+    (function () {
+      // Data caches
+      let allUsers = [];
+      let allBuses = [];
+      let currentAdminUser = null;
+
+      // ── Auth check ──
+      requireAuth('admin').then(({ user, userData }) => {
+        currentAdminUser = user;
+        hideLoader();
+        document.getElementById('admin-navbar').style.display = 'flex';
+        document.getElementById('admin-content').style.display = 'block';
+        document.getElementById('admin-name-badge').innerHTML =
+          `👤 <strong>${userData.name || user.email}</strong>`;
+
+        // Load all data
+        loadAllData();
+      }).catch(() => {
+        // Auth guard handles redirect
+      });
+
+      // ── Load all data from Firestore ──
+      window.loadAllData = async function () {
+        try {
+          await Promise.all([loadUsers(), loadBuses()]);
+          populateDropdowns();
+          updateStats();
+          // Start fleet tracking on the admin map
+          if (adminMap) startFleetTracking(allBuses, allUsers);
+        } catch (err) {
+          console.error('Error loading data:', err);
+          showToast('Error loading data.', 'error');
+        }
+      };
+
+      // ── Load Users ──
+      async function loadUsers() {
+        const snapshot = await db.collection('users').get();
+        allUsers = [];
+
+        snapshot.forEach(doc => {
+          allUsers.push({ id: doc.id, ...doc.data() });
+        });
+
+        // Render users table
+        const tbody = document.getElementById('users-tbody');
+        if (allUsers.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);">No users found.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = allUsers.map(u => `
+          <tr>
+            <td>${escapeHtml(u.name || '—')}</td>
+            <td>${escapeHtml(u.email || '—')}</td>
+            <td>
+              <span class="status-badge ${u.role === 'admin' ? 'status-active' : u.role === 'driver' ? '' : ''}">
+                ${u.role || '—'}
+              </span>
+            </td>
+            <td>${u.assigned_bus_id || '—'}</td>
+          </tr>
+        `).join('');
+      }
+
+      // ── Load Buses ──
+      async function loadBuses() {
+        const snapshot = await db.collection('buses').get();
+        allBuses = [];
+
+        snapshot.forEach(doc => {
+          allBuses.push({ id: doc.id, ...doc.data() });
+        });
+
+        // Render buses table
+        const tbody = document.getElementById('buses-tbody');
+        if (allBuses.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);">No buses found.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = allBuses.map(b => {
+          // Find driver name
+          const driver = allUsers.find(u => u.id === b.driver_id);
+          const driverName = driver ? driver.name || driver.email : '—';
+          const statusClass = b.status === 'active' ? 'status-active' : 'status-inactive';
+          return `
+            <tr>
+              <td><strong>${escapeHtml(b.id)}</strong></td>
+              <td>${escapeHtml(driverName)}</td>
+              <td><span class="status-badge ${statusClass}"><span class="status-dot"></span> ${b.status || 'inactive'}</span></td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      // ── Populate dropdown selects ──
+      function populateDropdowns() {
+        const drivers = allUsers.filter(u => u.role === 'driver');
+        const parents = allUsers.filter(u => u.role === 'parent');
+
+        // Driver dropdown
+        const driverSelect = document.getElementById('assign-driver-select');
+        driverSelect.innerHTML = '<option value="">— Choose Driver —</option>' +
+          drivers.map(d => `<option value="${d.id}">${escapeHtml(d.name || d.email)}</option>`).join('');
+
+        // Parent dropdown
+        const parentSelect = document.getElementById('assign-parent-select');
+        parentSelect.innerHTML = '<option value="">— Choose Parent —</option>' +
+          parents.map(p => `<option value="${p.id}">${escapeHtml(p.name || p.email)}</option>`).join('');
+
+        // Bus dropdowns (for both assign-driver and assign-parent)
+        const busOptions = '<option value="">— Choose Bus —</option>' +
+          allBuses.map(b => `<option value="${b.id}">${escapeHtml(b.id)}</option>`).join('');
+
+        document.getElementById('assign-driver-bus-select').innerHTML = busOptions;
+        document.getElementById('assign-parent-bus-select').innerHTML = busOptions;
+      }
+
+      // ── Update Stats ──
+      function updateStats() {
+        document.getElementById('stat-buses').textContent = allBuses.length;
+        document.getElementById('stat-drivers').textContent = allUsers.filter(u => u.role === 'driver').length;
+        document.getElementById('stat-parents').textContent = allUsers.filter(u => u.role === 'parent').length;
+        document.getElementById('stat-active').textContent = allBuses.filter(b => b.status === 'active').length;
+      }
+
+      // ──────────────────────────────────────────────────────────
+      // FORM HANDLERS
+      // ──────────────────────────────────────────────────────────
+
+      /**
+       * Create Driver Account
+       * Uses a secondary Firebase Auth instance to create user without
+       * logging out the current admin.
+       */
+      document.getElementById('create-driver-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('driver-name').value.trim();
+        const email = document.getElementById('driver-email').value.trim();
+        const password = document.getElementById('driver-password').value;
+
+        if (!name || !email || !password) {
+          showToast('Please fill in all fields.', 'warning');
+          return;
+        }
+
+        showLoader();
+        try {
+          // Create a secondary Firebase app to create user without signing out admin
+          const secondaryApp = firebase.app().name === '[DEFAULT]'
+            ? (firebase.apps.find(a => a.name === 'Secondary') || firebase.initializeApp(firebaseConfig, 'Secondary'))
+            : firebase.app('Secondary');
+          const secondaryAuth = secondaryApp.auth();
+
+          const cred = await secondaryAuth.createUserWithEmailAndPassword(email, password);
+
+          // Create user profile in Firestore
+          await db.collection('users').doc(cred.user.uid).set({
+            name: name,
+            email: email,
+            role: 'driver',
+            assigned_bus_id: null,
+            created_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          // Sign out from secondary app
+          await secondaryAuth.signOut();
+
+          hideLoader();
+          showToast(`Driver "${name}" created successfully!`, 'success');
+          document.getElementById('create-driver-form').reset();
+          loadAllData();
+        } catch (err) {
+          hideLoader();
+          console.error('Error creating driver:', err);
+          showToast(getCreateUserError(err.code), 'error');
+        }
+      });
+
+      /**
+       * Create Parent Account
+       */
+      document.getElementById('create-parent-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('parent-name').value.trim();
+        const email = document.getElementById('parent-email').value.trim();
+        const password = document.getElementById('parent-password').value;
+
+        if (!name || !email || !password) {
+          showToast('Please fill in all fields.', 'warning');
+          return;
+        }
+
+        showLoader();
+        try {
+          const secondaryApp = firebase.apps.find(a => a.name === 'Secondary') ||
+            firebase.initializeApp(firebaseConfig, 'Secondary');
+          const secondaryAuth = secondaryApp.auth();
+
+          const cred = await secondaryAuth.createUserWithEmailAndPassword(email, password);
+
+          await db.collection('users').doc(cred.user.uid).set({
+            name: name,
+            email: email,
+            role: 'parent',
+            assigned_bus_id: null,
+            created_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          await secondaryAuth.signOut();
+
+          hideLoader();
+          showToast(`Parent "${name}" created successfully!`, 'success');
+          document.getElementById('create-parent-form').reset();
+          loadAllData();
+        } catch (err) {
+          hideLoader();
+          console.error('Error creating parent:', err);
+          showToast(getCreateUserError(err.code), 'error');
+        }
+      });
+
+      /**
+       * Create Bus Entry
+       */
+      document.getElementById('create-bus-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const busId = document.getElementById('bus-id-input').value.trim();
+
+        if (!busId) {
+          showToast('Please enter a Bus ID.', 'warning');
+          return;
+        }
+
+        showLoader();
+        try {
+          // Check if bus already exists
+          const existing = await db.collection('buses').doc(busId).get();
+          if (existing.exists) {
+            hideLoader();
+            showToast('A bus with this ID already exists.', 'warning');
+            return;
+          }
+
+          await db.collection('buses').doc(busId).set({
+            bus_id: busId,
+            driver_id: null,
+            current_location: null,
+            status: 'inactive',
+            created_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          hideLoader();
+          showToast(`Bus "${busId}" created successfully!`, 'success');
+          document.getElementById('create-bus-form').reset();
+          loadAllData();
+        } catch (err) {
+          hideLoader();
+          console.error('Error creating bus:', err);
+          showToast('Failed to create bus. Try again.', 'error');
+        }
+      });
+
+      /**
+       * Assign Driver to Bus
+       */
+      document.getElementById('assign-driver-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const driverId = document.getElementById('assign-driver-select').value;
+        const busId = document.getElementById('assign-driver-bus-select').value;
+
+        if (!driverId || !busId) {
+          showToast('Please select both a driver and a bus.', 'warning');
+          return;
+        }
+
+        showLoader();
+        try {
+          // Update driver's assigned_bus_id
+          await db.collection('users').doc(driverId).update({
+            assigned_bus_id: busId
+          });
+
+          // Update bus's driver_id
+          await db.collection('buses').doc(busId).update({
+            driver_id: driverId
+          });
+
+          hideLoader();
+          const driver = allUsers.find(u => u.id === driverId);
+          showToast(`${driver ? driver.name : 'Driver'} assigned to ${busId}!`, 'success');
+          loadAllData();
+        } catch (err) {
+          hideLoader();
+          console.error('Error assigning driver:', err);
+          showToast('Failed to assign driver. Try again.', 'error');
+        }
+      });
+
+      /**
+       * Assign Parent to Bus
+       */
+      document.getElementById('assign-parent-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const parentId = document.getElementById('assign-parent-select').value;
+        const busId = document.getElementById('assign-parent-bus-select').value;
+
+        if (!parentId || !busId) {
+          showToast('Please select both a parent and a bus.', 'warning');
+          return;
+        }
+
+        showLoader();
+        try {
+          await db.collection('users').doc(parentId).update({
+            assigned_bus_id: busId
+          });
+
+          hideLoader();
+          const parent = allUsers.find(u => u.id === parentId);
+          showToast(`${parent ? parent.name : 'Parent'} assigned to ${busId}!`, 'success');
+          loadAllData();
+        } catch (err) {
+          hideLoader();
+          console.error('Error assigning parent:', err);
+          showToast('Failed to assign parent. Try again.', 'error');
+        }
+      });
+
+      // ── Helper: Friendly user creation errors ──
+      function getCreateUserError(code) {
+        const map = {
+          'auth/email-already-in-use': 'An account with this email already exists.',
+          'auth/invalid-email': 'Please enter a valid email address.',
+          'auth/weak-password': 'Password must be at least 6 characters.',
+          'auth/operation-not-allowed': 'Email/password accounts are disabled. Enable them in Firebase Console.',
+        };
+        return map[code] || 'Failed to create account. Try again.';
+      }
+
+      // ── Helper: Escape HTML to prevent XSS ──
+      function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+    })();
+  </script>
+</body>
+</html>

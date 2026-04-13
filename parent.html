@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="School Bus Tracker — Parent view with live bus tracking on Google Maps." />
+  <title>School Bus Tracker — Parent</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Loader -->
+  <div id="loader" class="loader-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar" id="parent-navbar" style="display:none;">
+    <div class="logo">
+      <span class="icon">🚌</span>
+      <span>Bus Tracker</span>
+    </div>
+    <div class="nav-right">
+      <span class="user-badge" id="parent-name-badge">Parent</span>
+      <button class="btn btn-outline btn-sm" onclick="logout()" id="logout-btn">Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="page-container" id="parent-content" style="display:none;">
+    <div class="page-header">
+      <h1>📍 Live Bus Tracker</h1>
+      <p>Track your child's school bus in real-time on the map below.</p>
+    </div>
+
+    <!-- Bus Info Banner -->
+    <div class="card bus-info-banner" id="bus-info-banner">
+      <div class="bus-info-row">
+        <div class="bus-info-item">
+          <span class="bus-info-label">Bus</span>
+          <span class="bus-info-value" id="bus-name-display">—</span>
+        </div>
+        <div class="bus-info-item">
+          <span class="bus-info-label">Status</span>
+          <span id="bus-status-badge">
+            <span class="status-badge status-inactive"><span class="status-dot"></span> Inactive</span>
+          </span>
+        </div>
+        <div class="bus-info-item">
+          <span class="bus-info-label">Last Update</span>
+          <span class="bus-info-value" id="last-update-display">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Map Container -->
+    <div class="map-wrapper">
+      <div class="map-overlay">
+        <span class="status-badge" id="map-status-overlay">
+          <span class="status-dot"></span> Loading…
+        </span>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <!-- No Bus Assigned Message (hidden by default) -->
+    <div class="info-box warning hidden" id="no-bus-msg">
+      <span>⚠️</span>
+      <span>No bus has been assigned to your account yet. Please contact the school administrator.</span>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="app.js"></script>
+
+  <!--
+    🔧 REPLACE "YOUR_GOOGLE_MAPS_API_KEY" with your actual Google Maps API key.
+    Get one at: https://console.cloud.google.com/google/maps-apis
+  -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBqpH4NoMbdRasZbK_dG80ZCxZdpZD7088&callback=initMap" async defer></script>
+
+  <script>
+    // ──── Parent Page Logic ───────────────────────────────────────
+
+    let map = null;          // Google Map instance
+    let busMarker = null;    // Bus marker on the map
+    let assignedBusId = null;
+    let unsubscribe = null;  // Firestore listener unsubscribe function
+
+    /**
+     * Initialize Google Map (called by Google Maps API callback).
+     */
+    window.initMap = function () {
+      // Default center (will be updated when bus data arrives)
+      const defaultCenter = { lat: 20.5937, lng: 78.9629 }; // Center of India
+
+      map = new google.maps.Map(document.getElementById('map'), {
+        zoom: 15,
+        center: defaultCenter,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [
+          // Dark map theme to match the app
+          { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#304a7d' }] },
+          { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#255d6a' }] },
+          { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2c6675' }] },
+          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
+          { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#283d6a' }] },
+          { featureType: 'poi.park', elementType: 'geometry.fill', stylers: [{ color: '#023e58' }] },
+          { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f3948' }] },
+        ],
+      });
+    };
+
+    // ── Auth check & start listening ──
+    requireAuth('parent').then(({ user, userData }) => {
+      hideLoader();
+      document.getElementById('parent-navbar').style.display = 'flex';
+      document.getElementById('parent-content').style.display = 'block';
+
+      // Display parent name
+      document.getElementById('parent-name-badge').innerHTML =
+        `👤 <strong>${userData.name || user.email}</strong>`;
+
+      assignedBusId = userData.assigned_bus_id || null;
+
+      if (!assignedBusId) {
+        // No bus assigned
+        document.getElementById('no-bus-msg').classList.remove('hidden');
+        document.getElementById('bus-info-banner').style.display = 'none';
+        setMapOverlay('No bus assigned', false);
+        return;
+      }
+
+      // Display bus ID
+      document.getElementById('bus-name-display').textContent = assignedBusId;
+
+      // Start real-time listener on the bus document
+      startBusListener(assignedBusId);
+
+    }).catch(() => {
+      // Auth guard handles redirect
+    });
+
+    /**
+     * Listen to real-time changes on the bus document in Firestore.
+     * Updates the map marker and status whenever the driver sends a new location.
+     */
+    function startBusListener(busId) {
+      unsubscribe = db.collection('buses').doc(busId).onSnapshot(
+        (doc) => {
+          if (!doc.exists) {
+            showToast('Bus data not found.', 'error');
+            setMapOverlay('Bus not found', false);
+            return;
+          }
+
+          const data = doc.data();
+          const status = data.status || 'inactive';
+          const location = data.current_location; // GeoPoint
+          const lastUpdated = data.last_updated;
+
+          // Update status badge
+          updateStatusBadge(status);
+
+          // Update last update time
+          if (lastUpdated) {
+            document.getElementById('last-update-display').textContent = formatTimestamp(lastUpdated);
+          }
+
+          // Update map marker if location exists
+          if (location && location.latitude && location.longitude) {
+            const pos = { lat: location.latitude, lng: location.longitude };
+            updateBusMarker(pos, status);
+
+            if (status === 'active') {
+              setMapOverlay('Bus Active', true);
+            } else {
+              setMapOverlay('Bus Inactive', false);
+            }
+          } else {
+            setMapOverlay('Awaiting location…', false);
+          }
+        },
+        (error) => {
+          console.error('Firestore listener error:', error);
+          showToast('Error listening to bus updates.', 'error');
+        }
+      );
+    }
+
+    /**
+     * Update or create the bus marker on the map.
+     */
+    function updateBusMarker(position, status) {
+      if (!map) return;
+
+      if (busMarker) {
+        // Smoothly move the marker
+        busMarker.setPosition(position);
+      } else {
+        // Create new marker
+        busMarker = new google.maps.Marker({
+          position: position,
+          map: map,
+          title: 'School Bus',
+          icon: {
+            url: 'data:image/svg+xml,' + encodeURIComponent(`
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+                <circle cx="24" cy="24" r="22" fill="${status === 'active' ? '#10b981' : '#ef4444'}" opacity="0.3"/>
+                <circle cx="24" cy="24" r="14" fill="${status === 'active' ? '#10b981' : '#ef4444'}" opacity="0.6"/>
+                <text x="24" y="30" text-anchor="middle" font-size="20">🚌</text>
+              </svg>
+            `),
+            scaledSize: new google.maps.Size(48, 48),
+            anchor: new google.maps.Point(24, 24),
+          },
+          animation: google.maps.Animation.DROP,
+        });
+      }
+
+      // Update marker icon color based on status
+      busMarker.setIcon({
+        url: 'data:image/svg+xml,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
+            <circle cx="28" cy="28" r="26" fill="${status === 'active' ? '#10b981' : '#ef4444'}" opacity="0.2"/>
+            <circle cx="28" cy="28" r="16" fill="${status === 'active' ? '#10b981' : '#ef4444'}" opacity="0.5"/>
+            <text x="28" y="35" text-anchor="middle" font-size="22">🚌</text>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(56, 56),
+        anchor: new google.maps.Point(28, 28),
+      });
+
+      // Center map on bus
+      map.panTo(position);
+    }
+
+    /**
+     * Update the status badge elements.
+     */
+    function updateStatusBadge(status) {
+      const badgeHtml = status === 'active'
+        ? '<span class="status-badge status-active"><span class="status-dot"></span> Bus Active</span>'
+        : '<span class="status-badge status-inactive"><span class="status-dot"></span> Bus Inactive</span>';
+
+      document.getElementById('bus-status-badge').innerHTML = badgeHtml;
+    }
+
+    /**
+     * Set the map overlay label.
+     */
+    function setMapOverlay(text, active) {
+      const overlay = document.getElementById('map-status-overlay');
+      overlay.className = `status-badge ${active ? 'status-active' : 'status-inactive'}`;
+      overlay.innerHTML = `<span class="status-dot"></span> ${text}`;
+    }
+
+    // ── Cleanup listener on page unload ──
+    window.addEventListener('beforeunload', () => {
+      if (unsubscribe) unsubscribe();
+    });
+  </script>
+</body>
+</html>
