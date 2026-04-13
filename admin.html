@@ -77,6 +77,17 @@
           <span class="status-dot"></span> Monitoring
         </span>
       </div>
+      <div class="fleet-map-controls">
+        <div class="fleet-select-group">
+          <label for="fleet-bus-select">🚌 Select Bus</label>
+          <select id="fleet-bus-select" class="form-control">
+            <option value="all">— All Buses —</option>
+          </select>
+        </div>
+        <button class="btn btn-accent btn-sm" id="locate-bus-btn" onclick="locateSelectedBus()">
+          📍 Locate Bus
+        </button>
+      </div>
       <div class="map-wrapper">
         <div id="admin-map"></div>
       </div>
@@ -363,6 +374,52 @@
       };
     }
 
+    /**
+     * Populate the bus dropdown on the fleet map.
+     */
+    function populateMapBusSelector(buses) {
+      const select = document.getElementById('fleet-bus-select');
+      select.innerHTML = '<option value="all">— All Buses —</option>' +
+        buses.map(b => {
+          const statusIcon = b.status === 'active' ? '🟢' : '🔴';
+          return `<option value="${b.id}">${statusIcon} ${b.id}</option>`;
+        }).join('');
+    }
+
+    /**
+     * Locate the selected bus on the map — zoom in and center.
+     */
+    window.locateSelectedBus = function () {
+      const busId = document.getElementById('fleet-bus-select').value;
+
+      if (busId === 'all') {
+        // Fit all markers in view
+        if (Object.keys(busMarkers).length === 0) {
+          showToast('No bus locations available yet.', 'warning');
+          return;
+        }
+        const bounds = new google.maps.LatLngBounds();
+        Object.values(busMarkers).forEach(m => bounds.extend(m.getPosition()));
+        adminMap.fitBounds(bounds);
+        showToast('Showing all buses', 'success');
+        return;
+      }
+
+      const marker = busMarkers[busId];
+      if (marker) {
+        adminMap.panTo(marker.getPosition());
+        adminMap.setZoom(17);
+        // Trigger a bounce animation
+        marker.setAnimation(google.maps.Animation.BOUNCE);
+        setTimeout(() => marker.setAnimation(null), 2000);
+        // Open info window
+        google.maps.event.trigger(marker, 'click');
+        showToast(`Locating ${busId}...`, 'success');
+      } else {
+        showToast(`No location data for ${busId} yet.`, 'warning');
+      }
+    };
+
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
       busListeners.forEach(unsub => unsub());
@@ -396,7 +453,10 @@
           populateDropdowns();
           updateStats();
           // Start fleet tracking on the admin map
-          if (adminMap) startFleetTracking(allBuses, allUsers);
+          if (adminMap) {
+            startFleetTracking(allBuses, allUsers);
+            populateMapBusSelector(allBuses);
+          }
         } catch (err) {
           console.error('Error loading data:', err);
           showToast('Error loading data.', 'error');
